@@ -1,6 +1,5 @@
-*.class
-
-# Package Files #
-*.jar
-*.war
-*.ear
+bin/
+.metadata/
+compile*feature.xml
+clientdb.xml
+.DS_Store
