@@ -337,7 +337,10 @@ var define;
 			}
 		};
 		req.toUrl = function(moduleResource) {
+			var savedStack = moduleStack;
+			moduleStack = [id];
 			var url = _idToUrl(_expand(moduleResource)); 
+			moduleStack = savedStack;
 			return url;
 		};
 		req.defined = function(moduleName) {
@@ -568,6 +571,7 @@ var define;
 			var resolvedId = _idToUrl(id);
 			var cacheValue = precache[id];
 			cache[resolvedId] = cacheValue;
+			cache["url:"+resolvedId] = cacheValue;
 		}
 		precache = {};
 	};
@@ -673,7 +677,7 @@ var define;
 					}
 					cbiterate(exports, itr);
 				} else {
-					delete cblist[mid];
+					cblist[mid] = [];
 				}
 			};
 			for (mid in cblist) {
