@@ -45,10 +45,15 @@ var define;
 	var modulesLoaded = false;
 	var domLoaded = false;
 	var readyCallbacks = [];
-    
+	var reqQueue = [];
+
 	var opts = Object.prototype.toString;
 	
 	var geval = window.execScript || eval;
+	
+	var scripts = document.getElementsByTagName('script');
+	var zazlpath = scripts[scripts.length-1].src.split('?')[0];
+	zazlpath = zazlpath.split('/').slice(0, -1).join('/')+'/';	
 
     function isFunction(it) { return opts.call(it) === "[object Function]"; }
     function isArray(it) { return opts.call(it) === "[object Array]"; }
@@ -290,6 +295,83 @@ var define;
 		}
 	}
 	
+	function _clone(obj) {
+		if (null === obj || "object" !== typeof obj) { return obj; }
+		var copy;
+		if (obj instanceof Array) {
+			copy = [];
+	        var len = obj.length;
+	        for (var i = 0; i < len; ++i) {
+	            copy[i] = _clone(obj[i]);
+	        }
+	        return copy;
+	    }
+	    if (obj instanceof Object) {
+			copy = {};
+			for (var attr in obj) {
+				if (obj.hasOwnProperty(attr)) {
+					if (isFunction(obj[attr])) {
+						copy[attr] = "function";
+					} else {
+						copy[attr] = _clone(obj[attr]);
+					}
+	            }
+	        }
+	        return copy;
+	    }
+	    throw new Error("Unable to clone");
+	}
+	
+	function _createScriptTag(url, cb) {
+		var script = document.createElement('script');
+		script.type = "text/javascript";
+		script.src = url;
+		script.charset = "utf-8";
+		script.onloadDone = false;
+		script.onload = function() {
+			if (!script.onloadDone) {
+				script.onloadDone = true;
+				cb();
+			}
+		};
+		script.onreadystatechange = function(){
+			if (("loaded" === script.readyState || "complete" === script.readyState) && !script.onloadDone) {
+				script.onload();
+			}
+		};
+		document.getElementsByTagName("head")[0].appendChild(script);
+	}
+	
+	function _createZazlUrl(modules) {
+		var locale = "en-us";
+		if (window.dojoConfig && window.dojoConfig.locale) {
+			locale = dojoConfig.locale;
+		}
+		var configString = JSON.stringify(_clone(cfg));
+		var zazlUrl = cfg.injectUrl+"?modules=";
+		for (var i = 0; i < modules.length; i++) {
+			zazlUrl += modules[i];
+			zazlUrl += i < (modules.length - 1) ? "," : "";
+		}
+		zazlUrl += "&writeBootstrap=false&locale="+locale+"&config="+encodeURIComponent(configString)+"&exclude=";
+		for (i = 0; i < analysisKeys.length; i++) {
+			zazlUrl += analysisKeys[i];
+			zazlUrl += i < (analysisKeys.length - 1) ? "," : "";
+		}
+		return zazlUrl;
+	}
+	
+	function _checkForJSON(cb) {
+		if (typeof JSON === 'undefined') {
+			console.log("JSON is not available in this Browser. Loading JSON script");
+			_createScriptTag(zazlpath+"/json2.js", function(){
+				cb();
+			})
+		} else {
+			cb();
+		}
+	}
+	
 	function _inject(moduleIds, cb) {
 		var notLoaded = [];
 		var i;
@@ -307,66 +389,14 @@ var define;
 			processQueues();
 			return;
 		}
-		var locale = "en-us";
-		if (window.dojoConfig && window.dojoConfig.locale) {
-			locale = dojoConfig.locale;
-		}
-		function clone(obj) {
-			if (null === obj || "object" !== typeof obj) { return obj; }
-			var copy;
-			if (obj instanceof Array) {
-				copy = [];
-		        var len = obj.length;
-		        for (var i = 0; i < len; ++i) {
-		            copy[i] = clone(obj[i]);
-		        }
-		        return copy;
-		    }
-		    if (obj instanceof Object) {
-				copy = {};
-				for (var attr in obj) {
-					if (obj.hasOwnProperty(attr)) {
-						if (isFunction(obj[attr])) {
-							copy[attr] = "function";
-						} else {
-							copy[attr] = clone(obj[attr]);
-						}
-		            }
-		        }
-		        return copy;
-		    }
-		    throw new Error("Unable to clone");
-		}
-		var configString = JSON.stringify(clone(cfg));
-		var url = cfg.injectUrl+"?modules=";
-		for (i = 0; i < notLoaded.length; i++) {
-			url += notLoaded[i];
-			url += i < (notLoaded.length - 1) ? "," : "";
-		}
-		url += "&writeBootstrap=false&locale="+locale+"&config="+encodeURIComponent(configString)+"&exclude=";
-		for (i = 0; i < analysisKeys.length; i++) {
-			url += analysisKeys[i];
-			url += i < (analysisKeys.length - 1) ? "," : "";
-		}
-		var script = document.createElement('script');
-		script.type = "text/javascript";
-		script.src = url;
-		script.charset = "utf-8";
-		script.onloadDone = false;
-		script.onload = function() {
-			if (!script.onloadDone) {
-				script.onloadDone = true;
+		_checkForJSON(function() {
+			var url = _createZazlUrl(notLoaded);
+			_createScriptTag(url, function(){
 				processCache();
 				cb();
 				queueProcessor();
-			}
-		};
-		script.onreadystatechange = function(){
-			if (("loaded" === script.readyState || "complete" === script.readyState) && !script.onloadDone) {
-				script.onload();
-			}
-		};
-		document.getElementsByTagName("head")[0].appendChild(script);
+			});
+		});
 	}
 	
 	function _loadPlugin(pluginName, pluginModuleName, cb) {
@@ -590,8 +620,8 @@ var define;
 			cfg.config = cfg.config || {};
 			cfg.map = cfg.map || {};
 		}
-	};
-
+	}
+	
 	zazl = function(config, dependencies, callback) {
 		if (!isArray(config) && typeof config === "object") {
 			processConfig(config);
@@ -605,41 +635,39 @@ var define;
 			callback = dependencies;
 			dependencies = [];
 		}
-
-		function _callRequire() {
-			_require(dependencies, function() {
-				if (isFunction(callback)) {
-					callback.apply(null, arguments);
+		
+		function _callRequire(mods, cb) {
+			var _cb = cb;
+			_require(mods, function() {
+				if (isFunction(_cb)) {
+					_cb.apply(null, arguments);
 				}
-				requireInProcess = false;
+				fireIdleEvent();
+				var qe = reqQueue.shift();
+				if (qe) {
+					_load(qe.mods, qe.cb);
+				}
 			});
-			processCache();
-			queueProcessor();
 		}
 
-		function _load() {
+		function _load(mods, cb) {
 			requireInProcess = true;
 
-			if (cfg.directInject && dependencies.length > 0) {
-				_inject(dependencies, function(){
-					_callRequire();
+			if (cfg.directInject && mods.length > 0) {
+				_inject(mods, function(){
+					_callRequire(mods, cb);
 				});
 			} else {
-				_callRequire();
+				_callRequire(mods, cb);
+				processCache();
+				queueProcessor();
 			}
 		}
 
 		if (requireInProcess) {
-			var poller = function() {
-				if (requireInProcess) {
-					setTimeout(poller, 100);
-				} else {
-					_load();
-				}
-			};
-			poller();
+			reqQueue.push({mods: dependencies, cb: callback});
 		} else {
-			_load();
+			_load(dependencies, callback);
 		}
 	};
 	
@@ -663,12 +691,20 @@ var define;
 		analysisKeys.push(key);
 	};
 	
-	document.addEventListener("DOMContentLoaded", function() {
-		domLoaded = true;
-		if (modulesLoaded) {
-			processQueues();
+	function domReady() {
+		if (domLoaded === false) {
+			domLoaded = true;
+			if (modulesLoaded) {
+				processQueues();
+			}
 		}
-	}, false);
+	}
+	
+	if (document.addEventListener) {
+		document.addEventListener("DOMContentLoaded", domReady, false);
+	} else if (document.attachEvent)  {
+		document.attachEvent( "onreadystatechange", domReady);
+	} 
 	
 	if (!require) {
 		require = zazl;
@@ -740,13 +776,16 @@ var define;
 			var cbiterate = function(exports, itr) {
 				if (itr.hasMore()) {
 					var cbinst = itr.next();
-					if (cbinst.mid !== "") {
-						savedStack = moduleStack;
-						moduleStack = [cbinst.mid];
-					}
-					cbinst.cb(exports);
-					if (cbinst.mid !== "") {
-						moduleStack = savedStack;
+					if (!cbinst.called) {
+						cbinst.called = true;
+						if (cbinst.mid !== "") {
+							savedStack = moduleStack;
+							moduleStack = [cbinst.mid];
+						}
+						cbinst.cb(exports);
+						if (cbinst.mid !== "") {
+							moduleStack = savedStack;
+						}
 					}
 					cbiterate(exports, itr);
 				} else {
@@ -774,7 +813,7 @@ var define;
 		} catch (e) {
 			console.log("queueProcessor error : "+e);
 			allLoaded = true;
-			if (requireInProcess) { requireInProcess = false; }
+			if (requireInProcess) { fireIdleEvent(); }
 		}
 		return allLoaded;
 	}
@@ -785,5 +824,14 @@ var define;
 			setTimeout(poller, 0);
 		};
 		poller();
+	}
+	
+	function fireIdleEvent() {
+		requireInProcess = false;
+		if (window.addEventListener) {
+			var zazlIdleEvt = document.createEvent('Event');
+			zazlIdleEvt.initEvent('zazlIdle', true, true);
+			window.dispatchEvent(zazlIdleEvt);
+		}
 	}
 }());
