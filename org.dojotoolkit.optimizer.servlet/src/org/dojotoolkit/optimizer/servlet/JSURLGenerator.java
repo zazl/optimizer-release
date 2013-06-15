@@ -6,13 +6,21 @@
 package org.dojotoolkit.optimizer.servlet;
 
 import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletRequest;
+
+import org.dojotoolkit.json.JSONParser;
+import org.dojotoolkit.json.JSONSerializer;
 import org.dojotoolkit.optimizer.JSAnalysisData;
 import org.dojotoolkit.optimizer.JSOptimizer;
+import org.dojotoolkit.optimizer.Util;
 
 public class JSURLGenerator {
 	private boolean bootstrapwritten = false;
@@ -28,11 +36,52 @@ public class JSURLGenerator {
 		excludedList = new ArrayList<JSAnalysisData>();
 	}
 	
+	public String generateURL(String module, String configString) throws IOException {
+		@SuppressWarnings("unchecked")
+		Map<String, Object> pageConfig = (Map<String, Object>)JSONParser.parse(new StringReader(configString));
+		return generateURL(new String[] {module}, pageConfig, null);
+	}
+	
 	public String generateURL(String module, Map<String, Object> pageConfig) {
-		return generateURL(new String[] {module}, pageConfig);
+		return generateURL(new String[] {module}, pageConfig, null);
+	}
+	
+	public String generateURL(String module, String configString, HttpServletRequest request) throws IOException {
+		@SuppressWarnings("unchecked")
+		Map<String, Object> pageConfig = (Map<String, Object>)JSONParser.parse(new StringReader(configString));
+		return generateURL(new String[] {module}, pageConfig, request);
+	}
+	
+	public String generateURL(String module, Map<String, Object> pageConfig, HttpServletRequest request) {
+		return generateURL(new String[] {module}, pageConfig, request);
+	}
+	
+	public String generateURL(String[] modules, String configString) throws IOException {
+		@SuppressWarnings("unchecked")
+		Map<String, Object> pageConfig = (Map<String, Object>)JSONParser.parse(new StringReader(configString));
+		return generateURL(modules, pageConfig, null);
 	}
 	
 	public String generateURL(String[] modules, Map<String, Object> pageConfig) {
+		return generateURL(modules, pageConfig, null);
+	}
+	
+	public String generateURL(String[] modules, String configString, HttpServletRequest request) throws IOException {
+		@SuppressWarnings("unchecked")
+		Map<String, Object> pageConfig = (Map<String, Object>)JSONParser.parse(new StringReader(configString));
+		return generateURL(modules, pageConfig, request);
+	}
+	
+	public String generateURL(String[] modules, Map<String, Object> pageConfig, HttpServletRequest request) {
+		if (request != null) {
+			String baseUrl = pageConfig.containsKey("baseUrl") ? (String)pageConfig.get("baseUrl") : "./";
+			if (baseUrl.charAt(0) != '/') {
+				String fullPath = request.getRequestURI();
+				baseUrl = fullPath.substring(0, fullPath.lastIndexOf('/')) + '/'+ baseUrl;
+				baseUrl = Util.normalizePath(baseUrl);
+				pageConfig.put("baseUrl", baseUrl);
+			}
+		}
 		StringBuffer url = new StringBuffer();
 		try {
 			JSAnalysisData[] excludes = new JSAnalysisData[excludedList.size()];
@@ -44,6 +93,10 @@ public class JSURLGenerator {
             url.append(analysisData.getChecksum());
             url.append("&locale=");
             url.append(locale);
+            url.append("&config=");
+            StringWriter sw = new StringWriter();
+            JSONSerializer.serialize(sw, pageConfig);
+            url.append(URLEncoder.encode(sw.toString(), "UTF-8"));
 			if (bootstrapwritten) {
 				url.append("&writeBootstrap=false");
 			} else {
